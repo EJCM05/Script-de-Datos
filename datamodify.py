@@ -103,8 +103,8 @@ if archivo_xlsx:
     # Guardar el documento de Word
     try:
         fecha_actual = datetime.now().strftime('%Y%m%d')
-        doc.save(f'datos_extraidos_{fecha_actual}.docx')
-        print(f"Datos exportados a 'datos_extraidos_{fecha_actual}.docx' correctamente.")
+        doc.save(f'{sheet_name}_{fecha_actual}.docx')
+        print(f"Datos exportados a '{sheet_name}_{fecha_actual}.docx' correctamente.")
     except Exception as e:
         print(f"Error al exportar a Word: {e}")
 else:
