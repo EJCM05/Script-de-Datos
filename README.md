@@ -1,4 +1,3 @@
-```markdown
 # Script-de-Datos
 
 ## Descripción
@@ -21,4 +20,3 @@ python NameScript.py
 ## Configuración
 
 Es importante ajustar el directorio en el script según tus necesidades específicas para asegurar que los archivos Excel correctos sean procesados.
-```
