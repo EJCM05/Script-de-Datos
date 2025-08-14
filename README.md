@@ -1,15 +1,24 @@
+```markdown
 # Script-de-Datos
-Script para obtener datos desde Varios archivos excel hacia un solo documento de word\
 
-# Versiones
+## Descripción
 
-v1: Solo procesa un solo archivo excel. Es la logica base (Deprecado)
-v2: El Script actual, procesa multiples archivos .xls y exporta un solo archivo .docx (Actual)
+Este script está diseñado para extraer datos de múltiples archivos Excel y consolidarlos en un único documento de Word.
 
-bash
-```
+## Versiones
+
+- **v1 (Deprecado):** Procesaba un solo archivo Excel. Esta versión representa la lógica base del script.
+- **v2 (Actual):** La versión actual del script que procesa múltiples archivos `.xls` y exporta los datos combinados a un único archivo `.docx`.
+
+## Uso
+
+Para ejecutar el script, utiliza el siguiente comando:
+
+```bash
 python NameScript.py
-
 ```
 
-### Recordar ajustar el directorio segun la necesidad
+## Configuración
+
+Es importante ajustar el directorio en el script según tus necesidades específicas para asegurar que los archivos Excel correctos sean procesados.
+```
