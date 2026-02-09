@@ -4,131 +4,144 @@ from docx import Document
 from docx.shared import Pt
 from datetime import datetime
 
-# Función para procesar una hoja y agregar su contenido al documento
 def procesar_hoja(sheet_name, df, doc):
     """
-    Procesa los datos de una hoja específica y los agrega al documento Word.
-    
-    Args:
-        sheet_name (str): El nombre de la hoja de Excel.
-        df (pd.DataFrame): El DataFrame de pandas con los datos de la hoja.
-        doc (docx.Document): El objeto del documento de Word al que se agregará el contenido.
+    Procesa los datos de una hoja y los organiza por trimestres, meses y tipos.
     """
-    # Normalizar los nombres de las columnas
-    df.columns = [col.lower().strip() for col in df.columns]
-
-    # Ignorar columnas específicas
+    # NORMALIZACIÓN
+    df.columns = [col.lower().strip().replace('_', ' ') for col in df.columns]
     columnas_a_ignorar = ["material utilizado", "status", "comisiones"]
     df = df[[col for col in df.columns if col not in columnas_a_ignorar]]
 
-    # Verificar si quedan columnas para procesar
     if df.empty:
-        print(f"No hay datos útiles en la hoja: {sheet_name}. Se omitirá.")
+        print(f"No hay datos útiles en la hoja: {sheet_name}.")
         return
 
-    # Limpiar espacios en blanco en los datos y reemplazar celdas vacías por NaN
-    # Usamos .copy() para evitar SettingWithCopyWarning
     df = df.replace(r"^\s*$", pd.NA, regex=True).copy()
+    doc.add_heading(f'Hoja: {sheet_name}', level=2)
 
-    # Agregar el nombre de la hoja como título
-    titulo = doc.add_heading(f'Datos de la hoja: {sheet_name}', level=2)
-    titulo_run = titulo.runs[0]
-    titulo_run.font.size = Pt(13.5)
-    doc.add_paragraph() # Agrega un salto de línea después del título
-
-    # Verificar si la columna "tipo de procedimiento" existe
-    if "tipo de procedimiento" not in df.columns:
-        print(f"La columna 'tipo de procedimiento' no se encontró en la hoja: {sheet_name}. Se omitirá el análisis detallado.")
+    col_objetivo = "tipo procedimiento"
+    col_fecha = "fecha"
+    
+    if col_objetivo not in df.columns or col_fecha not in df.columns:
+        print(f"⚠️ Faltan columnas clave ('fecha' o 'tipo procedimiento') en: {sheet_name}.")
         return
 
-    # Conteo por "Tipo de Procedimiento"
-    conteo_tipos = df["tipo de procedimiento"].value_counts(dropna=True)
+    # Preparación de fechas y agrupación
+    df[col_fecha] = pd.to_datetime(df[col_fecha], errors='coerce')
+    df = df.dropna(subset=[col_fecha]) # Eliminar registros sin fecha para el análisis
+    
+    df['año'] = df[col_fecha].dt.year
+    df['mes_num'] = df[col_fecha].dt.month
+    df['mes_nombre'] = df[col_fecha].dt.strftime('%B')
+    df['trimestre'] = df[col_fecha].dt.quarter
 
-    # Agregar al documento el conteo
-    doc.add_heading("Conteo por Tipo de Procedimiento", level=3)
-    for tipo, cantidad in conteo_tipos.items():
-        doc.add_paragraph(f"{tipo}: {cantidad} Procedimientos")
+    nombres_trimestres = {
+        1: "Primer Trimestre (Ene-Mar)",
+        2: "Segundo Trimestre (Abr-Jun)",
+        3: "Tercer Trimestre (Jul-Sep)",
+        4: "Cuarto Trimestre (Oct-Dic)"
+    }
 
-    # Separación de datos por "Tipo de Procedimiento"
-    doc.add_heading("Datos separados por Tipo de Procedimiento", level=3)
-    for tipo in df["tipo de procedimiento"].dropna().unique():
-        # Agregamos un subtítulo para cada tipo de procedimiento
-        tipo_subtitulo = doc.add_heading(f'Tipo de Procedimiento: {tipo}', level=4)
-        tipo_subtitulo.runs[0].bold = True
+    # --- 1. TABLA RESUMEN TEMPORAL (TRIMESTRE -> MES) ---
+    doc.add_heading("Resumen Temporal: Trimestres y Meses", level=3)
+    table_t = doc.add_table(rows=1, cols=2)
+    table_t.style = 'Table Grid'
+    hdr_t = table_t.rows[0].cells
+    hdr_t[0].text = 'Periodo (Trimestre / Mes)'
+    hdr_t[1].text = 'Total Procedimientos'
 
-        # Filtrar las filas correspondientes al tipo actual
-        df_tipo = df[df["tipo de procedimiento"] == tipo]
+    # Agrupar por trimestre y luego por mes
+    for tri in sorted(df['trimestre'].unique()):
+        # Fila de Trimestre
+        tri_row = table_t.add_row().cells
+        tri_row[0].text = nombres_trimestres.get(tri, f"Trimestre {tri}").upper()
+        cant_tri = df[df['trimestre'] == tri].shape[0]
+        tri_row[1].text = str(cant_tri)
+        # Negrita para el trimestre
+        for cell in tri_row:
+            for p in cell.paragraphs:
+                for r in p.runs: r.bold = True
+        
+        # Filas de Meses dentro de ese trimestre
+        df_tri = df[df['trimestre'] == tri]
+        for mes in sorted(df_tri['mes_num'].unique()):
+            mes_row = table_t.add_row().cells
+            nombre_mes = df_tri[df_tri['mes_num'] == mes]['mes_nombre'].iloc[0]
+            mes_row[0].text = f"   > {nombre_mes.capitalize()}"
+            mes_row[1].text = str(df_tri[df_tri['mes_num'] == mes].shape[0])
 
-        # Verificar columnas con datos para este tipo de procedimiento
-        columnas_con_datos = [
-            col for col in df_tipo.columns if df_tipo[col].notna().any()
-        ]
-        df_tipo = df_tipo[columnas_con_datos]
+    doc.add_paragraph()
 
-        # Exportar filas al documento
-        for _, item in df_tipo.iterrows():
+    # --- 2. RESUMEN DETALLADO POR MES ---
+    doc.add_heading("Desglose Detallado por Mes", level=3)
+    
+    # Ordenar por fecha real para el detalle
+    df_sorted = df.sort_values(by=col_fecha)
+
+    for mes_num in df_sorted['mes_num'].unique():
+        nombre_mes_actual = df_sorted[df_sorted['mes_num'] == mes_num]['mes_nombre'].iloc[0].upper()
+        
+        # Título del Mes
+        doc.add_heading(f"RESUMEN DE {nombre_mes_actual}", level=4)
+        df_mes = df_sorted[df_sorted['mes_num'] == mes_num]
+
+        # Sub-conteo por tipo dentro del mes
+        conteo_mes = df_mes[col_objetivo].value_counts()
+        p_conteo = doc.add_paragraph()
+        p_conteo.add_run(f"Total en {nombre_mes_actual.capitalize()}: {df_mes.shape[0]} registros.\n").bold = True
+        
+        for tipo, cant in conteo_mes.items():
+            p_conteo.add_run(f" • {tipo}: {cant}\n")
+
+        # Registros individuales del mes
+        doc.add_paragraph("Registros individuales:").italic = True
+        for _, item in df_mes.iterrows():
             data_line = []
-            for col in columnas_con_datos:
-                valor = item.get(col, None)
-                if pd.notna(valor):  # Agregar solo si el valor no es NaN
-                    if isinstance(valor, str):
-                        data_line.append(f"{col.replace('_', ' ').title()}: {valor.strip()}")
-                    else:
-                        data_line.append(f"{col.replace('_', ' ').title()}: {valor}")
-            # Agregar solo si hay datos válidos en esta fila
-            if data_line:
-                doc.add_paragraph(', '.join(data_line))
-    
+            for col in df_mes.columns:
+                if col not in ['año', 'mes_num', 'mes_nombre', 'trimestre']:
+                    valor = item[col]
+                    if pd.notna(valor):
+                        if isinstance(valor, datetime):
+                            valor = valor.strftime('%Y-%m-%d')
+                        col_name = col.replace('_', ' ').title()
+                        data_line.append(f"{col_name}: {valor}")
+            doc.add_paragraph(', '.join(data_line), style='List Bullet')
+        
+        doc.add_paragraph("-" * 30) # Separador visual
 
-# Directorio donde se encuentran los archivos .xlsx y el script
-directorio = './por_procesar/junio/'
+# --- Lógica de archivos ---
+directorio = './por_procesar/'
+extensiones_soportadas = ('.xlsx', '.xls', '.ods')
+archivos = [f for f in os.listdir(directorio) if f.lower().endswith(extensiones_soportadas)]
 
-# Buscar todos los archivos con extensión .xlsx
-archivos_xlsx = [archivo for archivo in os.listdir(directorio) if archivo.endswith('.xlsx')]
-
-# --- Inicio de la lógica principal ---
-# Verificar si se encontraron archivos .xlsx
-if archivos_xlsx:
-    print(f"Archivos Excel encontrados: {archivos_xlsx}")
-    
-    # Crear un nuevo documento de Word que contendrá todos los análisis
+if archivos:
     doc = Document()
-    print("Creando documento de Word...")
-
-    # Procesar cada archivo encontrado
-    for archivo_xlsx in archivos_xlsx:
-        print(f"\n--- Procesando archivo: {archivo_xlsx} ---")
-        
-        # Agregar un título para el archivo actual en el documento
-        doc.add_heading(f"Análisis del archivo: {archivo_xlsx}", level=1)
-        
-        ruta_completa = os.path.join(directorio, archivo_xlsx)
-        try:
-            xls = pd.ExcelFile(ruta_completa, engine='openpyxl')
-        except Exception as e:
-            print(f"Error al leer el archivo Excel: {e}")
-            continue # Continuar con el siguiente archivo si hay un error
-
-        # Procesar cada hoja del archivo actual
-        for sheet_name in xls.sheet_names:
-            print(f"  Procesando hoja: {sheet_name}")
-            df = pd.read_excel(ruta_completa, sheet_name=sheet_name)
-            procesar_hoja(sheet_name, df, doc)
-        
-        # Agrega un salto de página después de cada archivo para mantener la individualidad
-        doc.add_page_break()
-
-    # --- Lógica de guardado después de procesar todos los archivos ---
+    # Configurar idioma a español para nombres de meses (opcional si el sistema está en ES)
     try:
-        # Generar un nombre de archivo único y descriptivo para el documento final
-        fecha_actual = datetime.now().strftime('%Y%m%d')
-        nombre_salida = f'analisis_consolidado_{fecha_actual}.docx'
-        
-        doc.save(nombre_salida)
-        print(f"\nProceso completado. Datos de todos los archivos exportados a '{nombre_salida}' correctamente.")
-    except Exception as e:
-        print(f"Error al exportar a Word: {e}")
-else:
-    print("No se encontró ningún archivo .xlsx en el directorio.")
+        import locale
+        locale.setlocale(locale.LC_TIME, 'es_ES.UTF-8')
+    except:
+        pass # Si falla, usará nombres en inglés
 
-print("Directorio actual:", os.getcwd())
+    for archivo in archivos:
+        print(f"Procesando: {archivo}")
+        doc.add_heading(f"REPORTE: {archivo}", level=1)
+        ruta = os.path.join(directorio, archivo)
+        ext = os.path.splitext(archivo)[1].lower()
+        engine = 'openpyxl' if ext == '.xlsx' else 'odf' if ext == '.ods' else 'xlrd'
+
+        try:
+            xls = pd.ExcelFile(ruta, engine=engine)
+            for sheet in xls.sheet_names:
+                df = pd.read_excel(xls, sheet_name=sheet)
+                procesar_hoja(sheet, df, doc)
+            doc.add_page_break()
+        except Exception as e:
+            print(f"Error en {archivo}: {e}")
+
+    nombre_final = f'reporte_evolutivo_{datetime.now().strftime("%Y%m%d")}.docx'
+    doc.save(nombre_final)
+    print(f"✅ Reporte generado: {nombre_final}")
+else:
+    print("No se encontraron archivos.")
